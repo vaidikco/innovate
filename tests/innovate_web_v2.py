@@ -1,19 +1,22 @@
 import os
 import subprocess
-import google.generativeai as genai
-from datetime import datetime
-import re
-import dotenv
+import zipfile
 import random
 import string
-import zipfile
+import re
+import dotenv
+from datetime import datetime
 from flask import Flask, render_template, request, redirect, url_for, flash, send_file, session, jsonify
+from google import genai
+
+# ========== Config ==========
 
 dotenv.load_dotenv()
 key = os.getenv("API-KEY")
 
-genai.configure(api_key=key)
-model = genai.GenerativeModel("gemini-2.0-flash")
+# Gemini client setup (new style)
+client = genai.Client(api_key="AIzaSyBraenCIuVM6jRPCSCQkWylfnFnu6cqK8I")
+model_name = "gemini-2.5-pro"
 
 app = Flask(__name__)
 app.secret_key = "secret-key"
@@ -28,6 +31,7 @@ def log(msg):
         f.write(line)
 
 langs = {"python", "html", "js", "javascript", "css", "ts", "typescript", "bash", "sh", "json"}
+
 def clean_block(block):
     lines = block.strip().splitlines()
     cleaned = "\n".join(lines[1:]) if lines and lines[0].strip().lower() in langs else block.strip()
@@ -51,7 +55,12 @@ def generate_steps(prompt):
         "[APPEND] path/to/file.ext:\n```\nappended content\n```\n"
         "No explanations. No markdown headings. Only actionable steps."
     )
-    response = model.generate_content(f"{sys_prompt}\nUser prompt: {prompt}")
+    full_prompt = f"{sys_prompt}\nUser prompt: {prompt}"
+
+    response = client.models.generate_content(
+        model=model_name,
+        contents=full_prompt,
+    )
     return response.text
 
 def parse_steps(text):
@@ -135,5 +144,6 @@ def download():
         return redirect(url_for("index"))
 
 # ========== Run ==========
+
 if __name__ == "__main__":
     app.run(debug=True, port=5200)

@@ -1,0 +1,244 @@
+import glfw
+from OpenGL.GL import *
+from OpenGL.GLU import *
+import numpy as np
+import math
+
+# --- Aircraft State ---
+class Aircraft:
+    def __init__(self):
+        self.position = np.array([0.0, 50.0, 0.0], dtype=float)
+        self.velocity = np.array([0.0, 0.0, -50.0], dtype=float) # Start with some forward speed
+        self.pitch = 0.0  # rotation around x-axis
+        self.roll = 0.0   # rotation around z-axis
+        self.yaw = 0.0    # rotation around y-axis
+        self.throttle = 0.5
+        
+        # --- Constants ---
+        self.mass = 1000.0
+        self.gravity = 9.81
+        self.lift_coefficient = 0.15
+        self.drag_coefficient = 0.005
+        self.thrust_force = 40000.0
+
+# --- Input State ---
+keys = {
+    'up': False, 'down': False, 'left': False, 'right': False,
+    'w': False, 's': False, 'a': False, 'd': False
+}
+
+def key_callback(window, key, scancode, action, mods):
+    is_pressed = action == glfw.PRESS or action == glfw.REPEAT
+    
+    if key == glfw.KEY_UP: keys['up'] = is_pressed
+    if key == glfw.KEY_DOWN: keys['down'] = is_pressed
+    if key == glfw.KEY_LEFT: keys['left'] = is_pressed
+    if key == glfw.KEY_RIGHT: keys['right'] = is_pressed
+    if key == glfw.KEY_W: keys['w'] = is_pressed
+    if key == glfw.KEY_S: keys['s'] = is_pressed
+    if key == glfw.KEY_A: keys['a'] = is_pressed
+    if key == glfw.KEY_D: keys['d'] = is_pressed
+    if key == glfw.KEY_ESCAPE and action == glfw.PRESS:
+        glfw.set_window_should_close(window, True)
+
+def update_physics(plane, dt):
+    # --- Control Inputs ---
+    pitch_rate = 0
+    roll_rate = 0
+    yaw_rate = 0
+    
+    if keys['up']: pitch_rate = -50.0
+    if keys['down']: pitch_rate = 50.0
+    if keys['left']: roll_rate = -50.0
+    if keys['right']: roll_rate = 50.0
+    if keys['a']: yaw_rate = 50.0
+    if keys['d']: yaw_rate = -50.0
+    
+    if keys['w']: plane.throttle = min(1.0, plane.throttle + 0.5 * dt)
+    if keys['s']: plane.throttle = max(0.0, plane.throttle - 0.5 * dt)
+
+    plane.pitch += pitch_rate * dt
+    plane.roll += roll_rate * dt
+    plane.yaw += yaw_rate * dt
+
+    # Limit pitch and roll
+    plane.pitch = max(-80.0, min(80.0, plane.pitch))
+    # plane.roll = max(-90.0, min(90.0, plane.roll))
+
+    # --- Matrix Calculations for Orientation ---
+    # Create rotation matrices
+    pitch_rad = np.radians(plane.pitch)
+    roll_rad = np.radians(plane.roll)
+    yaw_rad = np.radians(plane.yaw)
+
+    cy, sy = np.cos(yaw_rad), np.sin(yaw_rad)
+    cp, sp = np.cos(pitch_rad), np.sin(pitch_rad)
+    cr, sr = np.cos(roll_rad), np.sin(roll_rad)
+    
+    # Rotation matrix for yaw, pitch, roll
+    rot_matrix = np.array([
+        [cy*cr + sy*sp*sr, -cy*sr + sy*sp*cr, sy*cp],
+        [cp*sr, cp*cr, -sp],
+        [-sy*cr + cy*sp*sr, sy*sr + cy*sp*cr, cy*cp]
+    ])
+
+    # Local axes based on rotation
+    forward_vec = np.array([-rot_matrix[0][2], -rot_matrix[1][2], -rot_matrix[2][2]])
+    up_vec = np.array([rot_matrix[0][1], rot_matrix[1][1], rot_matrix[2][1]])
+    
+    # --- Forces ---
+    speed = np.linalg.norm(plane.velocity)
+    
+    # 1. Thrust
+    thrust = forward_vec * plane.throttle * plane.thrust_force
+
+    # 2. Lift
+    # Simple model: lift is perpendicular to velocity in the plane's "up" direction
+    lift_direction = np.cross(np.cross(plane.velocity, up_vec), plane.velocity)
+    lift_direction /= (np.linalg.norm(lift_direction) + 1e-6) # Normalize
+    lift_magnitude = plane.lift_coefficient * speed**2
+    lift = lift_direction * lift_magnitude
+    
+    # 3. Drag
+    drag = -plane.velocity * speed * plane.drag_coefficient
+
+    # 4. Gravity
+    gravity_force = np.array([0, -plane.gravity * plane.mass, 0])
+    
+    # --- Net Force & Acceleration ---
+    net_force = thrust + lift + drag + gravity_force
+    acceleration = net_force / plane.mass
+    
+    # --- Update State ---
+    plane.velocity += acceleration * dt
+    plane.position += plane.velocity * dt
+
+    # Ground collision
+    if plane.position[1] < 0.1:
+        plane.position[1] = 0.1
+        plane.velocity[1] = 0
+
+def draw_plane():
+    # Fuselage (long box)
+    glPushMatrix()
+    glColor3f(0.8, 0.8, 0.9)
+    glScalef(1.0, 1.0, 5.0)
+    draw_cube()
+    glPopMatrix()
+    
+    # Wings (flat box)
+    glPushMatrix()
+    glColor3f(0.6, 0.6, 0.7)
+    glScalef(8.0, 0.2, 1.5)
+    glTranslatef(0.0, 0.0, 0.0)
+    draw_cube()
+    glPopMatrix()
+
+    # Tail wing
+    glPushMatrix()
+    glColor3f(0.6, 0.6, 0.7)
+    glTranslatef(0.0, 0.5, 2.0)
+    glScalef(3.0, 0.15, 0.8)
+    draw_cube()
+    glPopMatrix()
+
+    # Vertical Stabilizer
+    glPushMatrix()
+    glColor3f(0.7, 0.7, 0.8)
+    glTranslatef(0.0, 1.0, 2.2)
+    glScalef(0.2, 1.5, 0.8)
+    draw_cube()
+    glPopMatrix()
+
+def draw_cube():
+    glBegin(GL_QUADS)
+    # Front Face
+    glVertex3f(-0.5, -0.5, 0.5); glVertex3f(0.5, -0.5, 0.5)
+    glVertex3f(0.5, 0.5, 0.5); glVertex3f(-0.5, 0.5, 0.5)
+    # Back Face
+    glVertex3f(-0.5, -0.5, -0.5); glVertex3f(-0.5, 0.5, -0.5)
+    glVertex3f(0.5, 0.5, -0.5); glVertex3f(0.5, -0.5, -0.5)
+    # Top Face
+    glVertex3f(-0.5, 0.5, -0.5); glVertex3f(-0.5, 0.5, 0.5)
+    glVertex3f(0.5, 0.5, 0.5); glVertex3f(0.5, 0.5, -0.5)
+    # Bottom Face
+    glVertex3f(-0.5, -0.5, -0.5); glVertex3f(0.5, -0.5, -0.5)
+    glVertex3f(0.5, -0.5, 0.5); glVertex3f(-0.5, -0.5, 0.5)
+    # Right face
+    glVertex3f(0.5, -0.5, -0.5); glVertex3f(0.5, 0.5, -0.5)
+    glVertex3f(0.5, 0.5, 0.5); glVertex3f(0.5, -0.5, 0.5)
+    # Left Face
+    glVertex3f(-0.5, -0.5, -0.5); glVertex3f(-0.5, -0.5, 0.5)
+    glVertex3f(-0.5, 0.5, 0.5); glVertex3f(-0.5, 0.5, -0.5)
+    glEnd()
+
+def draw_ground():
+    glColor3f(0.2, 0.6, 0.2)
+    glBegin(GL_QUADS)
+    glVertex3f(-10000, 0, -10000)
+    glVertex3f(-10000, 0, 10000)
+    glVertex3f(10000, 0, 10000)
+    glVertex3f(10000, 0, -10000)
+    glEnd()
+
+def main():
+    if not glfw.init():
+        return
+    
+    width, height = 1280, 720
+    window = glfw.create_window(width, height, "Python Flight Simulator", None, None)
+    if not window:
+        glfw.terminate()
+        return
+
+    glfw.make_context_current(window)
+    glfw.set_key_callback(window, key_callback)
+
+    glEnable(GL_DEPTH_TEST)
+    glMatrixMode(GL_PROJECTION)
+    glLoadIdentity()
+    gluPerspective(45, width / height, 0.1, 50000.0)
+    glMatrixMode(GL_MODELVIEW)
+
+    plane = Aircraft()
+    last_time = glfw.get_time()
+
+    while not glfw.window_should_close(window):
+        current_time = glfw.get_time()
+        dt = current_time - last_time
+        last_time = current_time
+
+        update_physics(plane, dt)
+
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        glClearColor(0.5, 0.7, 1.0, 1.0) # Sky blue
+        
+        glLoadIdentity()
+
+        # --- Set up camera (chase view) ---
+        cam_pos = plane.position - (plane.velocity / (np.linalg.norm(plane.velocity) + 1e-6)) * 25.0 + np.array([0.0, 10.0, 0.0])
+        look_at = plane.position + (plane.velocity / (np.linalg.norm(plane.velocity) + 1e-6)) * 10.0
+        gluLookAt(cam_pos[0], cam_pos[1], cam_pos[2],
+                  look_at[0], look_at[1], look_at[2],
+                  0, 1, 0)
+        
+        draw_ground()
+
+        # --- Draw plane at its position and orientation ---
+        glPushMatrix()
+        glTranslatef(plane.position[0], plane.position[1], plane.position[2])
+        glRotatef(plane.yaw, 0, 1, 0)
+        glRotatef(plane.pitch, 1, 0, 0)
+        glRotatef(plane.roll, 0, 0, -1)
+        draw_plane()
+        glPopMatrix()
+
+        glfw.swap_buffers(window)
+        glfw.poll_events()
+
+    glfw.terminate()
+
+if __name__ == "__main__":
+    main()
+
+# Powered by Innovate CLI, a product of vaidik.co

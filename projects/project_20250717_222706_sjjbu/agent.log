@@ -1,0 +1,151 @@
+[2025-07-17 22:27:06] 📁 Working in project folder: projects/project_20250717_222706_sjjbu
+[2025-07-17 22:27:41] 📋 Generated Raw Output:
+[CMD] pip install Flask Flask-SQLAlchemy
+[CREATE] app.py:
+```python
+import os
+from flask import Flask, render_template, request, redirect, url_for
+from flask_sqlalchemy import SQLAlchemy
+from datetime import date, datetime
+
+# --- App and Database Configuration ---
+app = Flask(__name__)
+basedir = os.path.abspath(os.path.dirname(__file__))
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'habits.db')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db = SQLAlchemy(app)
+
+# --- Database Models ---
+class Habit(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    logs = db.relationship('Log', backref='habit', cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f'<Habit {self.name}>'
+
+class Log(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    log_date = db.Column(db.Date, nullable=False)
+    habit_id = db.Column(db.Integer, db.ForeignKey('habit.id'), nullable=False)
+
+    def __repr__(self):
+        return f'<Log {self.log_date}>'
+
+# --- Application Routes ---
+@app.route('/')
+def index():
+    habits = Habit.query.order_by(Habit.created_at.desc()).all()
+    today = date.today()
+    habits_with_status = []
+    for habit in habits:
+        log_today = Log.query.filter_by(habit_id=habit.id, log_date=today).first()
+        habits_with_status.append((habit, log_today is not None))
+    return render_template('index.html', habits_with_status=habits_with_status)
+
+@app.route('/add', methods=['POST'])
+def add_habit():
+    habit_name = request.form.get('habit_name')
+    if habit_name:
+        new_habit = Habit(name=habit_name)
+        db.session.add(new_habit)
+        db.session.commit()
+    return redirect(url_for('index'))
+
+@app.route('/log/<int:habit_id>', methods=['POST'])
+def log_habit(habit_id):
+    today = date.today()
+    # Prevent duplicate logs for the same day
+    existing_log = Log.query.filter_by(habit_id=habit_id, log_date=today).first()
+    if not existing_log:
+        log = Log(habit_id=habit_id, log_date=today)
+        db.session.add(log)
+        db.session.commit()
+    return redirect(url_for('index'))
+
+@app.route('/delete/<int:habit_id>', methods=['POST'])
+def delete_habit(habit_id):
+    habit = Habit.query.get_or_404(habit_id)
+    db.session.delete(habit)
+    db.session.commit()
+    return redirect(url_for('index'))
+
+# --- Main Execution ---
+if __name__ == '__main__':
+    with app.app_context():
+        db.create_all() # Creates the database tables if they don't exist
+    app.run(debug=True, port=5001)
+```
+[CREATE] templates/index.html:
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Habit Tracker</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f4f4f9; color: #333; margin: 0; padding: 2rem; }
+        .container { max-width: 600px; margin: auto; background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #444; }
+        form { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
+        input[type="text"] { flex-grow: 1; padding: 0.75rem; border: 1px solid #ddd; border-radius: 4px; font-size: 1rem; }
+        button { padding: 0.75rem 1.5rem; border: none; border-radius: 4px; font-size: 1rem; cursor: pointer; }
+        .btn-add { background-color: #007bff; color: white; }
+        .btn-add:hover { background-color: #0056b3; }
+        ul { list-style: none; padding: 0; }
+        li { display: flex; justify-content: space-between; align-items: center; padding: 1rem; border-bottom: 1px solid #eee; }
+        li:last-child { border-bottom: none; }
+        .habit-name { font-size: 1.1rem; }
+        .actions { display: flex; gap: 0.5rem; }
+        .btn-log { background-color: #28a745; color: white; }
+        .btn-log:hover { background-color: #218838; }
+        .btn-log:disabled { background-color: #6c757d; cursor: not-allowed; }
+        .btn-delete { background-color: #dc3545; color: white; }
+        .btn-delete:hover { background-color: #c82333; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Habit Tracker</h1>
+        <form action="{{ url_for('add_habit') }}" method="post">
+            <input type="text" name="habit_name" placeholder="Enter a new habit" required>
+            <button type="submit" class="btn-add">Add Habit</button>
+        </form>
+        <ul>
+            {% for habit, logged_today in habits_with_status %}
+            <li>
+                <span class="habit-name">{{ habit.name }}</span>
+                <div class="actions">
+                    <form action="{{ url_for('log_habit', habit_id=habit.id) }}" method="post" style="margin-bottom:0;">
+                        <button type="submit" class="btn-log" {% if logged_today %}disabled{% endif %}>
+                            {% if logged_today %}Done!{% else %}Log Today{% endif %}
+                        </button>
+                    </form>
+                    <form action="{{ url_for('delete_habit', habit_id=habit.id) }}" method="post" style="margin-bottom:0;">
+                        <button type="submit" class="btn-delete">Delete</button>
+                    </form>
+                </div>
+            </li>
+            {% else %}
+            <li>No habits yet. Add one above!</li>
+            {% endfor %}
+        </ul>
+    </div>
+</body>
+</html>
+```
+[CMD] python3 app.py
+[2025-07-17 22:27:41] 
+--- Step 1 [CMD] ---
+pip install Flask Flask-SQLAlchemy
+[2025-07-17 22:27:41] Running command: pip install Flask Flask-SQLAlchemy
+[2025-07-17 22:27:46] 
+--- Step 2 [CREATE] ---
+app.py:
+[2025-07-17 22:27:46] Created file: app.py
+[2025-07-17 22:27:46] 
+--- Step 3 [CREATE] ---
+templates/index.html:
+[2025-07-17 22:27:46] Created file: templates/index.html

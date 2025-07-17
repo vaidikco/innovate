@@ -1,0 +1,332 @@
+[2025-07-17 22:31:41] 📁 Working in project folder: projects/project_20250717_223141_xekkx
+[2025-07-17 22:32:23] 📋 Generated Raw Output:
+[CMD] python -m venv venv
+[CMD] venv\Scripts\activate
+[CMD] pip install PyQt6 google-generativeai speechrecognition pyaudio
+[CREATE] database.py:
+```python
+import sqlite3
+
+def get_db_connection():
+    conn = sqlite3.connect('tasks.db')
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def create_table():
+    conn = get_db_connection()
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            due_date TEXT,
+            category TEXT,
+            status TEXT DEFAULT 'pending'
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+if __name__ == '__main__':
+    create_table()
+    print("Database table created successfully.")
+```
+[CMD] python database.py
+[CREATE] app.py:
+```python
+import sys
+import sqlite3
+import speech_recognition as sr
+import google.generativeai as genai
+from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
+                             QLineEdit, QPushButton, QListWidget, QListWidgetItem,
+                             QMessageBox, QLabel, QDialog, QTextEdit)
+from PyQt6.QtCore import Qt
+
+# --- Configuration ---
+# IMPORTANT: Replace "YOUR_GEMINI_API_KEY" with your actual API key
+GEMINI_API_KEY = "YOUR_GEMINI_API_KEY"
+try:
+    genai.configure(api_key=GEMINI_API_KEY)
+    gemini_model = genai.GenerativeModel('gemini-1.5-pro-latest')
+except Exception as e:
+    print(f"Error configuring Gemini API: {e}")
+    gemini_model = None
+
+# --- Stylesheets ---
+DARK_THEME = """
+QWidget {
+    background-color: #2b2b2b;
+    color: #ffffff;
+    font-family: Arial;
+}
+QLineEdit, QTextEdit, QListWidget {
+    background-color: #3c3c3c;
+    border: 1px solid #555;
+    padding: 5px;
+}
+QPushButton {
+    background-color: #555;
+    border: 1px solid #666;
+    padding: 5px 10px;
+    border-radius: 4px;
+}
+QPushButton:hover {
+    background-color: #666;
+}
+QPushButton:pressed {
+    background-color: #777;
+}
+"""
+
+LIGHT_THEME = """
+QWidget {
+    background-color: #f0f0f0;
+    color: #000000;
+    font-family: Arial;
+}
+QLineEdit, QTextEdit, QListWidget {
+    background-color: #ffffff;
+    border: 1px solid #ccc;
+    padding: 5px;
+}
+QPushButton {
+    background-color: #e1e1e1;
+    border: 1px solid #adadad;
+    padding: 5px 10px;
+    border-radius: 4px;
+}
+QPushButton:hover {
+    background-color: #e9e9e9;
+}
+QPushButton:pressed {
+    background-color: #dcdcdc;
+}
+"""
+
+# --- Database Functions ---
+def get_db_connection():
+    conn = sqlite3.connect('tasks.db')
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def get_tasks():
+    conn = get_db_connection()
+    tasks = conn.execute('SELECT * FROM tasks ORDER BY due_date').fetchall()
+    conn.close()
+    return tasks
+
+def add_task(name, due_date, category):
+    conn = get_db_connection()
+    conn.execute('INSERT INTO tasks (name, due_date, category) VALUES (?, ?, ?)',
+                 (name, due_date, category))
+    conn.commit()
+    conn.close()
+
+def delete_task(task_id):
+    conn = get_db_connection()
+    conn.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
+    conn.commit()
+    conn.close()
+
+
+# --- Main Application Window ---
+class TaskMasterApp(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.is_dark_theme = True
+        self.init_ui()
+        self.load_tasks()
+
+    def init_ui(self):
+        self.setWindowTitle('TaskMaster - AI To-Do App')
+        self.setGeometry(100, 100, 600, 500)
+        self.setStyleSheet(DARK_THEME)
+
+        # Layout
+        main_layout = QVBoxLayout()
+        input_layout = QHBoxLayout()
+        button_layout = QHBoxLayout()
+
+        # Widgets
+        self.task_list = QListWidget()
+        self.task_list.itemDoubleClicked.connect(self.delete_task_prompt)
+
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("Task Name")
+        self.date_input = QLineEdit()
+        self.date_input.setPlaceholderText("Due Date (e.g., Tomorrow 6pm)")
+        self.category_input = QLineEdit()
+        self.category_input.setPlaceholderText("Category (e.g., Work)")
+
+        add_button = QPushButton("Add Task")
+        add_button.clicked.connect(self.add_task)
+
+        self.voice_button = QPushButton("🎤 Voice Command")
+        self.voice_button.clicked.connect(self.process_voice_command)
+
+        prioritize_button = QPushButton("✨ Prioritize My Day")
+        prioritize_button.clicked.connect(self.prioritize_tasks)
+        
+        theme_button = QPushButton("Toggle Theme")
+        theme_button.clicked.connect(self.toggle_theme)
+
+        # Assemble Layout
+        input_layout.addWidget(self.name_input)
+        input_layout.addWidget(self.date_input)
+        input_layout.addWidget(self.category_input)
+        input_layout.addWidget(add_button)
+        
+        button_layout.addWidget(self.voice_button)
+        button_layout.addWidget(prioritize_button)
+        button_layout.addWidget(theme_button)
+        
+        main_layout.addWidget(QLabel("Tasks (Double-click to delete)"))
+        main_layout.addWidget(self.task_list)
+        main_layout.addLayout(input_layout)
+        main_layout.addLayout(button_layout)
+        
+        self.setLayout(main_layout)
+
+    def load_tasks(self):
+        self.task_list.clear()
+        tasks = get_tasks()
+        for task in tasks:
+            display_text = f"{task['name']} (Due: {task['due_date']}, Cat: {task['category']})"
+            item = QListWidgetItem(display_text)
+            item.setData(Qt.ItemDataRole.UserRole, task['id'])
+            self.task_list.addItem(item)
+
+    def add_task(self):
+        name = self.name_input.text()
+        due_date = self.date_input.text()
+        category = self.category_input.text()
+        if name:
+            add_task(name, due_date, category)
+            self.name_input.clear()
+            self.date_input.clear()
+            self.category_input.clear()
+            self.load_tasks()
+        else:
+            QMessageBox.warning(self, "Input Error", "Task name cannot be empty.")
+
+    def delete_task_prompt(self, item):
+        task_id = item.data(Qt.ItemDataRole.UserRole)
+        reply = QMessageBox.question(self, 'Delete Task', 
+                                     f"Are you sure you want to delete this task?\n\n{item.text()}",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, 
+                                     QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            delete_task(task_id)
+            self.load_tasks()
+
+    def process_voice_command(self):
+        recognizer = sr.Recognizer()
+        with sr.Microphone() as source:
+            self.voice_button.setText("Listening...")
+            self.voice_button.repaint()
+            QApplication.processEvents()
+            try:
+                audio = recognizer.listen(source, timeout=5)
+                command = recognizer.recognize_google(audio)
+                QMessageBox.information(self, "Voice Command", f"Heard: {command}")
+                # Simple parsing logic
+                parts = command.lower().split()
+                if "add" in parts:
+                    try:
+                        due_index = parts.index("due")
+                        task_name = " ".join(parts[1:due_index])
+                        due_date = " ".join(parts[due_index+1:])
+                        self.name_input.setText(task_name.capitalize())
+                        self.date_input.setText(due_date)
+                    except ValueError:
+                        self.name_input.setText(" ".join(parts[1:]).capitalize())
+            except sr.UnknownValueError:
+                QMessageBox.warning(self, "Voice Error", "Could not understand audio.")
+            except sr.RequestError as e:
+                QMessageBox.critical(self, "Voice Error", f"Could not request results; {e}")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"An unexpected error occurred: {e}")
+            finally:
+                self.voice_button.setText("🎤 Voice Command")
+
+
+    def prioritize_tasks(self):
+        if not gemini_model:
+            QMessageBox.critical(self, "API Error", "Gemini API is not configured. Please set your API key.")
+            return
+
+        tasks = get_tasks()
+        if not tasks:
+            QMessageBox.information(self, "No Tasks", "You have no tasks to prioritize!")
+            return
+
+        task_list_str = "\n".join([f"- {task['name']} (Due: {task['due_date']}, Category: {task['category']})" for task in tasks])
+        prompt = f"""
+        You are a productivity assistant. Based on the following to-do list, please prioritize the tasks for today.
+        Provide a suggested order and some brief, actionable productivity tips related to this list.
+
+        My Tasks:
+        {task_list_str}
+
+        Format your response clearly with a 'Prioritized Order' section and a 'Productivity Tips' section.
+        """
+
+        try:
+            response = gemini_model.generate_content(prompt)
+            
+            # Display response in a dialog
+            dialog = QDialog(self)
+            dialog.setWindowTitle("AI Prioritization Plan")
+            dialog.setGeometry(200, 200, 400, 300)
+            layout = QVBoxLayout()
+            text_edit = QTextEdit()
+            text_edit.setReadOnly(True)
+            text_edit.setText(response.text)
+            layout.addWidget(text_edit)
+            dialog.setLayout(layout)
+            dialog.exec()
+
+        except Exception as e:
+            QMessageBox.critical(self, "AI Error", f"Failed to get prioritization from Gemini: {e}")
+
+    def toggle_theme(self):
+        if self.is_dark_theme:
+            self.setStyleSheet(LIGHT_THEME)
+        else:
+            self.setStyleSheet(DARK_THEME)
+        self.is_dark_theme = not self.is_dark_theme
+
+
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    if GEMINI_API_KEY == "YOUR_GEMINI_API_KEY":
+         QMessageBox.warning(None, "API Key Missing", "Gemini API key is not set in app.py. The 'Prioritize' feature will not work.")
+    window = TaskMasterApp()
+    window.show()
+    sys.exit(app.exec())
+```
+[CMD] python app.py
+[2025-07-17 22:32:23] 
+--- Step 1 [CMD] ---
+python -m venv venv
+[2025-07-17 22:32:23] Running command: python -m venv venv
+[2025-07-17 22:32:32] 
+--- Step 2 [CMD] ---
+venv\Scripts\activate
+[2025-07-17 22:32:32] Running command: venv\Scripts\activate
+[2025-07-17 22:32:33] 
+--- Step 3 [CMD] ---
+pip install PyQt6 google-generativeai speechrecognition pyaudio
+[2025-07-17 22:32:33] Running command: pip install PyQt6 google-generativeai speechrecognition pyaudio
+[2025-07-17 22:32:35] 
+--- Step 4 [CREATE] ---
+database.py:
+[2025-07-17 22:32:35] Created file: database.py
+[2025-07-17 22:32:35] 
+--- Step 5 [CMD] ---
+python database.py
+[2025-07-17 22:32:35] Running command: python database.py
+[2025-07-17 22:32:35] 
+--- Step 6 [CREATE] ---
+app.py:
+[2025-07-17 22:32:35] Created file: app.py

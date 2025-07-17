@@ -6,19 +6,14 @@ import random
 import fade
 import string
 from datetime import datetime
-from google import genai as gemini_pro
+from google import genai as genai
 
 # ==== Load API key from .env ====
 dotenv.load_dotenv()
 key = os.getenv("GEMINI_API_KEY")
 
-# ==== Gemini 2.5 Pro Client Setup ====
-try:
-    key = os.getenv("GEMINI_API_KEY")
-    client = gemini_pro.Client(api_key=key)
-except Exception:
-    # fallback to default key if .env or env var fails
-    client = gemini_pro.Client(api_key="AIzaSyBraenCIuVM6jRPCSCQkWylfnFnu6cqK8I")
+# ==== Gemini Client Setup ====
+client = genai.Client(api_key=key)
 
 # ==== Logging ====
 LOG_PATH = "agent.log"
@@ -37,10 +32,12 @@ def create_project_folder():
     os.makedirs(folder, exist_ok=True)
     return folder
 
-# ==== Step Generator using Gemini 2.5 Pro ====
-def generate_steps(prompt):
+# ==== Step Generator ====
+def generate_steps(prompt, model="gemini-1.5-flash"):
     sys_prompt = (
-        "You're a code execution planner known as Innovate CLI made by vaidik.co . From the user's request, generate a clean list of executable steps from the installation and the running procedure of the prompt given.\n"
+        "You're a code execution planner known as Innovate CLI made by vaidik.co.  "
+        "From the user's request, generate a clean list of executable steps.\n"
+        "Provide all steps required for the creation from installation to running."
         "Use ONLY this format:\n"
         "[CMD] shell command\n"
         "[CD] target_directory\n"
@@ -49,10 +46,7 @@ def generate_steps(prompt):
         "No explanations. No markdown headings. Only actionable steps."
     )
     full_prompt = f"{sys_prompt}\nUser prompt: {prompt}"
-    response = client.models.generate_content(
-        model="gemini-2.5-pro",
-        contents=full_prompt
-    )
+    response = client.models.generate_content(model=model, contents=full_prompt)
     return response.text
 
 # ==== Step Parser ====
@@ -99,6 +93,33 @@ def execute_steps(steps):
         except Exception as e:
             log(f"[ERROR] Step {i} failed: {e}")
 
+# ==== ASCII Mode Selector ====
+def choose_mode():
+    comparison = """
++----------------------------------------------------------+
+|               MODE COMPARISON: QUICK vs DEEP             |
++-------------------+-------------------+------------------+
+| Feature           | QUICK MODE        | DEEP MODE        |
++-------------------+-------------------+------------------+
+| Model Used        | Gemini 1.5 Flash  | Gemini 2.5 Pro   |
+| Speed             | ⚡ Very Fast       | 🧠 Slower        |
+| Code Quality      | ✅ Good            | ✅✅ Excellent    |
+| Accuracy          | Moderate          | High             |
+| File Structure    | Basic             | Optimized        |
+| Tailwind UI       | Sometimes basic   | Modern, polished |
+| Use Case          | Rapid prototyping | Production-grade |
++-------------------+-------------------+------------------+
+"""
+    print(fade.purplepink(comparison))
+    while True:
+        choice = input("Choose mode (quick / deep): ").strip().lower()
+        if choice in {"quick", "q"}:
+            return "gemini-1.5-flash"
+        elif choice in {"deep", "d"}:
+            return "gemini-2.5-pro"
+        else:
+            print("❗ Invalid choice. Please enter 'quick' or 'deep'.")
+
 # ==== Main Runner ====
 if __name__ == "__main__":
     banner = """
@@ -109,16 +130,22 @@ if __name__ == "__main__":
 ██╔╝     ██║██║ ╚████║██║ ╚████║╚██████╔╝ ╚████╔╝ ██║  ██║   ██║   ███████╗
 ╚═╝      ╚═╝╚═╝  ╚═══╝╚═╝  ╚═══╝ ╚═════╝   ╚═══╝  ╚═╝  ╚═╝   ╚═╝   ╚══════╝
                                                                             
- ██████╗██╗     ██╗                                                        
-██╔════╝██║     ██║                                                        
-██║     ██║     ██║                                                        
-██║     ██║     ██║                                                        
-╚██████╗███████╗██║                                                        
+ ██████╗██╗     ██╗                                                         
+██╔════╝██║     ██║                                                         
+██║     ██║     ██║                                                         
+██║     ██║     ██║                                                         
+╚██████╗███████╗██║                                                         
  ╚═════╝╚══════╝╚═╝              """
     print(fade.pinkred(banner))
     print("Welcome to Innovate CLI 0.5!")
     print("> The tool which helps imaginations turn into a reality. One of the best coding tools that you can use.")
     print("> Official documentation available at innovate.vaidik.co/docs")
+
+    # === Mode Selection ===
+    selected_model = choose_mode()
+    print(f"🔧 Using model: {selected_model}")
+
+    # === User Input ===
     user_prompt = input("\nWhat do you want to build or do?\n> ").strip()
     log(f"🔧 Prompt: {user_prompt}")
 
@@ -126,7 +153,7 @@ if __name__ == "__main__":
     os.chdir(project_folder)
     log(f"📁 Working in project folder: {project_folder}")
 
-    response_text = generate_steps(user_prompt)
+    response_text = generate_steps(user_prompt, model=selected_model)
     log("📋 Generated Raw Output:\n" + response_text)
 
     steps = parse_steps(response_text)
