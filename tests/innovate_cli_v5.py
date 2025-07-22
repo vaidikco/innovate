@@ -1,176 +1,180 @@
 import os
-import sys
-import time
-import json
-import uuid
-import shutil
-import random
 import subprocess
+import re
+import dotenv
+import random
+import fade
+import string
 from datetime import datetime
-from google import genai
-from dotenv import load_dotenv
+from google import genai as gemini_pro
 
-# Load API key
-load_dotenv()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-client = genai.Client(api_key=GEMINI_API_KEY)
+# ==== Load API key from .env ====
+dotenv.load_dotenv()
+key = os.getenv("GEMINI_API_KEY")
 
-# Logging setup
+# ==== Gemini 2.5 Pro Client Setup ====
+try:
+    key = os.getenv("GEMINI_API_KEY")
+    client = gemini_pro.Client(api_key=key)
+except Exception:
+    # fallback to default key if .env or env var fails
+    client = gemini_pro.Client(api_key="AIzaSyBraenCIuVM6jRPCSCQkWylfnFnu6cqK8I")
+
+# ==== Logging ====
+LOG_PATH = "agent.log"
 def log(msg):
     timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-    with open("agent.log", "a", encoding="utf-8") as f:
+    with open(LOG_PATH, "a", encoding="utf-8") as f:
         f.write(f"{timestamp} {msg}\n")
     print(f"{timestamp} {msg}")
 
-# Generate a project ID and directory
-def create_project_dir():
-    now = datetime.now().strftime("%Y%m%d_%H%M%S")
-    slug = uuid.uuid4().hex[:5]
-    project_name = f"project_{now}_{slug}"
-    full_path = os.path.join("projects", project_name)
-    os.makedirs(full_path, exist_ok=True)
-    return full_path
+# ==== Unique Project Folder Creator ====
+def create_project_folder():
+    os.makedirs("projects", exist_ok=True)
+    suffix = datetime.now().strftime("%Y%m%d_%H%M%S")
+    rand = ''.join(random.choices(string.ascii_lowercase + string.digits, k=5))
+    folder = f"projects/project_{suffix}_{rand}"
+    os.makedirs(folder, exist_ok=True)
+    return folder
 
-# Get user prompt
-def get_user_prompt():
-    return input("\nWhat do you want to build today?\n> ").strip()
-
-# Ask for generation mode
-def select_mode():
-    print(
-        "\n=== Select Mode ===\n"
-        "[1] ⚡ Quick Mode (faster, simpler, ~30 sec thinking)\n"
-        "[2] 🧠 Deep Mode (slower, better quality)\n"
-    )
-    while True:
-        choice = input("Choose [1 or 2]: ").strip()
-        if choice == "1":
-            return "quick"
-        elif choice == "2":
-            return "deep"
-        else:
-            print("Invalid input. Please type 1 or 2.")
-
-# Ask for output type
-def select_output_type():
-    print(
-        "\n=== Output Type ===\n"
-        "[1] App / CLI / Website Project\n"
-        "[2] Webpage (single file beautiful HTML)\n"
-    )
-    while True:
-        choice = input("Choose [1 or 2]: ").strip()
-        if choice == "1":
-            return "app"
-        elif choice == "2":
-            return "webpage"
-        else:
-            print("Invalid input. Please type 1 or 2.")
-
-# Compose prompt with system instructions
-def generate_steps(prompt, mode="quick", output_type="app"):
+# ==== Step Generator using Gemini 2.5 Pro ====
+def generate_steps(prompt):
     sys_prompt = (
-        "You are Innovate CLI, a precise and minimal code generation agent built by vaidik.co.\n"
-        "From the user’s request, break the project into sequential executable steps using ONLY the following format:\n\n"
+        "You're a code execution planner known as Innovate CLI made by vaidik.co . "
+        "From the user's request, generate a clean list of executable steps from the installation and the running procedure of the prompt given.\n"
+        "Use ONLY this format:\n"
         "[CMD] shell command\n"
-        "[CD] path/to/directory\n"
+        "[CD] target_directory\n"
         "[CREATE] path/to/file.ext:\n```\nfile contents\n```\n"
-        "[APPEND] path/to/file.ext:\n```\nappended content\n```\n\n"
-        "DO NOT explain anything. DO NOT add markdown. DO NOT return anything outside the above formats.\n"
+        "[APPEND] path/to/file.ext:\n```\nappended content\n```\n"
+        "No explanations. No markdown headings. Only actionable steps."
     )
-
-    if output_type == "webpage":
-        sys_prompt += (
-            "\n\nSTRICT RULES FOR WEBPAGE MODE:\n"
-            "- Only output ONE HTML file. No external CSS or JS.\n"
-            "- The file should be named `index.html`.\n"
-            "- Use TailwindCSS via CDN.\n"
-            "- Use the Inter font via Google Fonts.\n"
-            "- Embed all CSS in <style> blocks if needed.\n"
-            "- Generate a modern, beautiful webpage with full layout (nav, hero, sections, footer).\n"
-            "- It must be around 600+ lines (repeat blocks/dummy content if needed).\n"
-            "- No `style.css`, `script.js`, or asset folders.\n"
-            "- Again: ONE `index.html` file only."
-        )
-
-    if mode == "deep":
-        sys_prompt += "\n\nBe structured, comprehensive, elegant, and follow best coding practices."
-
-    full_prompt = f"{sys_prompt}\n\nUser prompt: {prompt}"
-
+    full_prompt = f"{sys_prompt}\nUser prompt: {prompt}"
     response = client.models.generate_content(
         model="gemini-2.5-pro",
         contents=full_prompt
     )
     return response.text
 
-# Execute generated steps
-def execute_steps(response, root_dir):
-    current_dir = root_dir
-    os.makedirs(current_dir, exist_ok=True)
-    os.chdir(current_dir)
+# ==== Step Parser ====
+def parse_steps(text):
+    pattern = r"\[(CMD|CD|CREATE|APPEND|EDIT)\](.*?)\n(?:```(.*?)```)?"
+    return re.findall(pattern, text, re.DOTALL)
 
-    blocks = response.split("\n--- ")
-    for block in blocks:
-        block = block.strip()
-        if not block:
-            continue
-        if block.startswith("Step"):
-            _, rest = block.split("] ", 1)
-            if rest.startswith("CMD"):
-                cmd = rest[4:].strip()
+# ==== Code Block Cleaner ====
+def clean_code_block(block):
+    lines = block.strip().splitlines()
+    if lines and lines[0].strip().lower() in {
+        "python", "html", "javascript", "js", "ts", "typescript", "bash", "sh", "json", "css"
+    }:
+        return "\n".join(lines[1:]) + "\n\n# Powered by Innovate CLI, a product of vaidik.co"
+    return block.strip() + "\n\n# Powered by Innovate CLI, a product of vaidik.co"
+
+# ==== Step Executor ====
+def execute_steps(steps):
+    for i, (step_type, content, block) in enumerate(steps, 1):
+        log(f"\n--- Step {i} [{step_type}] ---\n{content.strip()}")
+        try:
+            if step_type == "CMD":
+                cmd = content.strip()
                 log(f"Running command: {cmd}")
                 subprocess.run(cmd, shell=True)
-            elif rest.startswith("CD"):
-                path = rest[3:].strip()
-                new_dir = os.path.join(current_dir, path)
+            elif step_type == "CD":
+                new_dir = content.strip()
                 os.makedirs(new_dir, exist_ok=True)
-                current_dir = new_dir
-                os.chdir(current_dir)
-                log(f"Changed working directory to {current_dir}")
-            elif rest.startswith("CREATE"):
-                path, content = parse_file_block(rest[7:])
-                full_path = os.path.join(current_dir, path)
-                os.makedirs(os.path.dirname(full_path), exist_ok=True)
-                with open(full_path, "w", encoding="utf-8") as f:
-                    f.write(content)
-                log(f"Created file: {path}")
-            elif rest.startswith("APPEND"):
-                path, content = parse_file_block(rest[7:])
-                full_path = os.path.join(current_dir, path)
-                with open(full_path, "a", encoding="utf-8") as f:
-                    f.write(content)
-                log(f"Appended to file: {path}")
+                os.chdir(new_dir)
+                log(f"Changed working directory to {os.getcwd()}")
+            elif step_type == "CREATE":
+                file_path = content.strip().rstrip(":")
+                os.makedirs(os.path.dirname(file_path) or ".", exist_ok=True)
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(clean_code_block(block) + "\n")
+                log(f"Created file: {file_path}")
+            elif step_type == "APPEND":
+                file_path = content.strip().rstrip(":")
+                with open(file_path, "a", encoding="utf-8") as f:
+                    f.write("\n" + clean_code_block(block) + "\n")
+                log(f"Appended to file: {file_path}")
+            else:
+                log(f"[WARN] Unsupported step type: {step_type}")
+        except Exception as e:
+            log(f"[ERROR] Step {i} failed: {e}")
 
-# Parse code blocks from [CREATE]/[APPEND]
-def parse_file_block(block):
-    parts = block.strip().split(":\n```", 1)
-    path = parts[0].strip()
-    content = parts[1].strip().removesuffix("```").strip()
-    return path, content
+# ==== Chat Runner ====
+def chat_loop():
+    banner = """ 
+██╗      ██╗███╗   ██╗███╗   ██╗ ██████╗ ██╗   ██╗ █████╗ ████████╗███████╗
+╚██╗     ██║████╗  ██║████╗  ██║██╔═══██╗██║   ██║██╔══██╗╚══██╔══╝██╔════╝
+ ╚██╗    ██║██╔██╗ ██║██╔██╗ ██║██║   ██║██║   ██║███████║   ██║   █████╗  
+  ██╔╝    ██║██║╚██╗██║██║╚██╗██║██║   ██║╚██╗ ██╔╝██╔══██║   ██║   ██╔══╝  
+ ██╔╝     ██║██║ ╚████║██║ ╚████║╚██████╔╝ ╚████╔╝ ██║  ██║   ██║   ███████╗
+ ╚═╝      ╚═╝╚═╝  ╚═══╝╚═╝  ╚═══╝ ╚═════╝   ╚═══╝  ╚═╝  ╚═╝   ╚═╝   ╚══════╝
+"""
+    print(fade.pinkred(banner))
+    print("Welcome to Innovate CLI 0.5 Chat Mode!")
+    print("> Chat with Innovate CLI and generate projects iteratively.")
+    print("> Type 'exit' to quit or 'history' to view previous prompts.\n")
 
-# Compress final output folder
-def zip_project(path):
-    shutil.make_archive(path, 'zip', path)
-    log(f"Project zipped: {path}.zip")
+    history = []
+    session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    history_path = f"chat_logs/session_{session_id}.log"
+    os.makedirs("chat_logs", exist_ok=True)
 
-# === Main flow ===
+    root_dir = os.getcwd()
+
+    while True:
+        user_prompt = input("\n🧠 What do you want to build or do?\n> ").strip()
+
+        if user_prompt.lower() == "exit":
+            print("\n👋 Exiting Innovate CLI Chat. See you again!")
+            break
+        elif user_prompt.lower() == "history":
+            print("\n🕘 Previous Prompts:")
+            for i, item in enumerate(history, 1):
+                print(f"{i}. {item}")
+            continue
+        elif user_prompt.startswith("retry "):
+            try:
+                index = int(user_prompt.split(" ")[1]) - 1
+                user_prompt = history[index]
+                print(f"🔁 Retrying: {user_prompt}")
+            except (IndexError, ValueError):
+                print("❌ Invalid index for retry.")
+                continue
+        elif user_prompt.startswith("edit "):
+            try:
+                index = int(user_prompt.split(" ")[1]) - 1
+                base_prompt = history[index]
+                print(f"📝 Editing previous prompt: {base_prompt}")
+                new_part = input("Enter new addition or changes:\n> ").strip()
+                user_prompt = base_prompt + " " + new_part
+                print(f"🔁 New Modified Prompt: {user_prompt}")
+            except (IndexError, ValueError):
+                print("❌ Invalid index for edit.")
+                continue
+
+        log(f"🔧 Prompt: {user_prompt}")
+        history.append(user_prompt)
+
+        with open(history_path, "a", encoding="utf-8") as f:
+            f.write(f"> {user_prompt}\n")
+
+        try:
+            project_folder = create_project_folder()
+            os.chdir(project_folder)
+            log(f"📁 Working in project folder: {project_folder}")
+
+            response_text = generate_steps(user_prompt)
+            log("📋 Generated Raw Output:\n" + response_text)
+
+            steps = parse_steps(response_text)
+            execute_steps(steps)
+
+        except Exception as e:
+            log(f"❌ Error: {e}")
+        finally:
+            os.chdir(root_dir)
+
+# ==== Main ====
 if __name__ == "__main__":
-    print("███ Innovate CLI v5 — Powered by Gemini 2.5 Pro ███")
-    mode = select_mode()
-    output_type = select_output_type()
-    user_prompt = get_user_prompt()
-    log(f"Prompt: {user_prompt} | Mode: {mode} | Type: {output_type}")
-
-    project_dir = create_project_dir()
-    log(f"Project directory created at: {project_dir}")
-
-    response_text = generate_steps(user_prompt, mode=mode, output_type=output_type)
-    with open(os.path.join(project_dir, "generation.txt"), "w", encoding="utf-8") as f:
-        f.write(response_text)
-
-    execute_steps(response_text, project_dir)
-    zip_project(project_dir)
-
-    print(f"\n✅ Project generated at: {project_dir}")
-    print(f"📦 Zipped version: {project_dir}.zip")
+    chat_loop()
