@@ -1,6 +1,6 @@
 import os
 import subprocess
-import google.generativeai as genai
+from google import genai
 from datetime import datetime
 import re
 import dotenv
@@ -9,13 +9,16 @@ import string
 import zipfile
 from flask import Flask, render_template, request, redirect, url_for, flash, send_file, session
 
-# ==== Load API key ====
+# ==== Load API key from .env ====
 dotenv.load_dotenv()
-key = os.getenv("API-KEY")
+key = os.getenv("GEMINI_API_KEY")
 
-# ==== Gemini Config ====
-genai.configure(api_key=key)
-model = genai.GenerativeModel("gemini-2.0-flash")
+# ==== Gemini 2.5 Pro Client Setup ====
+try:
+    key = os.getenv("GEMINI_API_KEY")
+    client = genai.Client(api_key=key)
+except Exception:
+    client = genai.Client(api_key="AIzaSyBraenCIuVM6jRPCSCQkWylfnFnu6cqK8I")
 
 # ==== Flask App ====
 app = Flask(__name__)
@@ -48,7 +51,11 @@ def generate_steps(prompt):
         "[APPEND] path/to/file.ext:\n```\nappended content\n```\n"
         "No explanations. No markdown headings. Only actionable steps."
     )
-    response = model.generate_content(f"{sys_prompt}\nUser prompt: {prompt}")
+    full_prompt = f"{sys_prompt}\nUser prompt: {prompt}"
+    response = client.models.generate_content(
+        model="gemini-2.5-pro",
+        contents=full_prompt
+    )
     return response.text
 
 # ==== Step Parser ====
