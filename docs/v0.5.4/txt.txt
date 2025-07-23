@@ -1,0 +1,48 @@
+official documentation
+// innovateCLI 0.5.4 sustain///
+>> a product by vaidik.co <<
+
+dated. 23 july 2025
+
+Hello Everybody,
+The official documentation for this release lies below.
+
+The changes established in this release are:
+> creation and update of framework and structure of the project 
+from dash dash to sustain framework
+> improved overall integrity and flexibility of the project.
+> improved versatility by employing a better file structure
+
+To use // innovateCLI 0.5.4 sustain///:
+you must:
+
+> run setup.py
+> follow all instructions such as specifying the gemini api key.
+> restart your shell or create a new one  
+> use the 'innovate' command to run the cli successfully
+
+
+To use // innovateCLI 0.5.4 sustain/// as a framework or library
+> use this as a folder structure
+> from ./src/innovate.py and import it in a python file. (your directory may differ, but generaly at C:/innovate)
+
+Quickstart:
+from [directory-of-zip] import Innovate
+engine = Innovate(GEMINI-API-KEY)
+engine.ascii("my very own innovatecli integration in python!")
+while True:
+    query = input("? ").strip()
+    engine.generate(query)
+
+Notes:
+As of now the projects generated are at the source codes projects/ directory.
+Further flexibility will be added in the next subversion.
+The sustain framework will be updated in the future and will be the main means of using innovate CLI.
+This framework was made so that you and even us can implement the cli's actual code in a flexible manner such as for the creation of WI.
+The innovateWI (Web Interface) will be launching soon!
+
+
+// innovateCLI 0.5.4 sustain///
+>> a product by vaidik.co <<
+/ coded by Vaidik K and by InnovateCLI itself. /
+<< end of doc >>
