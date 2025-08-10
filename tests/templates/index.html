@@ -1,130 +1,67 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Innovate CLI</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
-  <style>
-    body {
-      background: #0d1117;
-      color: #fff;
-      font-family: 'Segoe UI', sans-serif;
-    }
-    .status {
-      font-size: 1.5rem;
-      animation: pulse 1.5s infinite;
-      margin-top: 2rem;
-      text-align: center;
-    }
-    @keyframes pulse {
-      0% { opacity: 0.4; }
-      50% { opacity: 1; }
-      100% { opacity: 0.4; }
-    }
-    .spinner {
-      width: 1rem;
-      height: 1rem;
-      border: 3px solid #ccc;
-      border-top-color: #007bff;
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-      display: inline-block;
-    }
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-
-    .chat-box {
-      height: 300px;
-      overflow-y: auto;
-      background: #161b22;
-      padding: 15px;
-      border-radius: 10px;
-      box-shadow: 0 0 10px #000;
-      margin-top: 2rem;
-    }
-    .chat-msg {
-      margin-bottom: 12px;
-    }
-    .chat-msg.user {
-      text-align: right;
-    }
-    .chat-msg.user .bubble {
-      background: #238636;
-      color: white;
-    }
-    .chat-msg.system .bubble {
-      background: #30363d;
-      color: #ccc;
-    }
-    .bubble {
-      display: inline-block;
-      padding: 8px 12px;
-      border-radius: 12px;
-      max-width: 80%;
-    }
-  </style>
+    <title>Innovate CLI Web</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 40px;
+            background-color: #f9f9f9;
+        }
+        .container {
+            max-width: 700px;
+            margin: auto;
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+        }
+        textarea {
+            width: 100%;
+            height: 140px;
+            padding: 10px;
+            font-size: 1rem;
+            border-radius: 6px;
+            border: 1px solid #ccc;
+            margin-bottom: 15px;
+        }
+        button {
+            background-color: #0a84ff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .alert {
+            padding: 10px;
+            margin-bottom: 15px;
+            border-radius: 6px;
+        }
+        .alert-success { background: #d4edda; color: #155724; }
+        .alert-danger { background: #f8d7da; color: #721c24; }
+    </style>
 </head>
 <body>
-  <div class="container mt-5 text-center">
-    <h1 class="mb-4">🚀 Innovate CLI</h1>
-    
-    <form method="POST" action="/" onsubmit="startStatusCycle()">
-      <textarea class="form-control" name="prompt" rows="4" placeholder="Describe your web app idea..." required></textarea>
-      <button type="submit" class="btn btn-primary mt-3">Generate</button>
-    </form>
+    <div class="container">
+        <h2>🚀 Innovate CLI Web</h2>
 
-    <div id="statusDisplay" class="status d-none">
-      <div class="spinner"></div>
-      <span id="statusText">Thinking...</span>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% for category, message in messages %}
+            <div class="alert alert-{{ category }}">{{ message }}</div>
+          {% endfor %}
+        {% endwith %}
+
+        <form method="POST">
+            <label for="prompt">Enter your project request:</label>
+            <textarea name="prompt" required placeholder="e.g., Build me a Next.js blog site with Tailwind."></textarea>
+            <button type="submit">Generate</button>
+        </form>
+
+        {% if session["zip_path"] %}
+            <p><a href="{{ url_for('download') }}">⬇️ Download Project ZIP</a></p>
+        {% endif %}
     </div>
-
-    <div class="chat-box" id="chatBox"></div>
-
-    <div class="mt-4">
-      <a href="/download" class="btn btn-success">⬇️ Download ZIP</a>
-    </div>
-  </div>
-
-  <script>
-    function startStatusCycle() {
-      const statusDisplay = document.getElementById("statusDisplay");
-      const statusText = document.getElementById("statusText");
-      statusDisplay.classList.remove("d-none");
-
-      const steps = [
-        { time: 0, text: "Thinking..." },
-        { time: 10000, text: "Deciding Technologies..." },
-        { time: 15000, text: "Outlining Structure of the Project..." },
-        { time: 25000, text: "Completing and Finishing Project..." },
-      ];
-
-      steps.forEach(({ time, text }) => {
-        setTimeout(() => {
-          statusText.textContent = text;
-        }, time);
-      });
-    }
-
-    function fetchLogs() {
-      fetch("/logs")
-        .then(res => res.json())
-        .then(lines => {
-          const box = document.getElementById("chatBox");
-          box.innerHTML = "";
-          lines.forEach(line => {
-            const isUser = line.includes("🔧 Prompt:");
-            const bubble = `<div class="chat-msg ${isUser ? 'user' : 'system'}">
-                              <div class="bubble">${line}</div>
-                            </div>`;
-            box.innerHTML += bubble;
-          });
-          box.scrollTop = box.scrollHeight;
-        });
-    }
-
-    setInterval(fetchLogs, 1000);
-  </script>
 </body>
 </html>

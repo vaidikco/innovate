@@ -84,7 +84,7 @@ class Innovate:
     def clean_code_block(self, block):
         lines = block.strip().splitlines()
         if lines and lines[0].strip().lower() in {
-            "python", "html", "javascript", "js", "ts", "typescript", "bash", "sh", "json", "css", "tsx", "jsx", "java", "c", "cpp", "csharp", "go", "ruby", "php", "swift", "kotlin", "sql"
+            "python", "html", "javascript", "js", "ts", "typescript", "bash", "sh", "json", "css"
         }:
             return "\n".join(lines[1:])
         return block.strip()
@@ -107,48 +107,18 @@ class Innovate:
 
         return folder
 
-    def get_mode_prompt(self, mode):
-        """Return a different system prompt based on mode."""
-        if mode.lower() == "website":
-            return (
-                """You're Innovate CLI (Website Mode) by vaidik.co.
-From the user's request, generate executable steps to set up and run a complete WEBSITE project.
-Focus on HTML, CSS, JavaScript, backend setup if needed, and deployment instructions.
-The UI and UX **must be world-class**, visually stunning, highly polished, and responsive across all devices, using cutting-edge design trends, animations, typography, and layouts — **never compromise on design quality or detail**.
-You may produce long, highly detailed code to achieve perfection in look and feel.
-Prioritize a premium, modern, elegant, and professional style. Also default properties --ts (no tailwind vanilla css) --eslint --app --src-dir --import-alias '@/*'
-Use ONLY this format:
 
-"Use ONLY this format:\n"
-                "[CMD] shell command\n"
-                "[CD] target_directory\n"
-                "[CREATE] path/to/file.ext:\n```\nfile contents\n```\n"
-                "[APPEND] path/to/file.ext:\n```\nappended content\n```\n"
-                "No explanations, no markdown headings, only actionable steps."
-
-No explanations, no markdown headings, only actionable steps."
-
-
-"""
-            )
-        elif mode.lower() == "app":
-            return (
-                "You're Innovate CLI (App Mode) by vaidik.co. "
-                "From the user's request, generate executable steps to build a full APPLICATION project. "
-                "Focus on app frameworks (e.g., React Native, Flutter, Python apps, etc.), "
-                "installation, configuration, and execution.\n"
-                "Use ONLY this format:\n"
-                "[CMD] shell command\n"
-                "[CD] target_directory\n"
-                "[CREATE] path/to/file.ext:\n```\nfile contents\n```\n"
-                "[APPEND] path/to/file.ext:\n```\nappended content\n```\n"
-                "No explanations, no markdown headings, only actionable steps."
-            )
-        else:
-            raise ValueError("Invalid mode. Please choose 'website' or 'app'.")
-
-    def generate_steps(self, prompt, mode):
-        sys_prompt = self.get_mode_prompt(mode)
+    def generate_steps(self, prompt):
+        sys_prompt = (
+            "You're a code execution planner known as Innovate CLI made by vaidik.co. From the user's request, "
+            "generate a clean list of executable steps from the installation and the running procedure of the prompt given.\n"
+            "Use ONLY this format:\n"
+            "[CMD] shell command\n"
+            "[CD] target_directory\n"
+            "[CREATE] path/to/file.ext:\n```\nfile contents\n```\n"
+            "[APPEND] path/to/file.ext:\n```\nappended content\n```\n"
+            "No explanations. No markdown headings. Only actionable steps."
+        )
         full_prompt = f"{sys_prompt}\nUser prompt: {prompt}"
         response = self.client.models.generate_content(
             model="gemini-2.5-pro",
@@ -189,11 +159,10 @@ No explanations, no markdown headings, only actionable steps."
             except Exception as e:
                 self.log(f"[ERROR] Step {i} failed: {e}")
 
-    def generate(self, prompt: str, mode: str):
+    def generate(self, prompt: str):
         folder = self.create_project_folder()
         os.chdir(folder)
         self.log(f"{Fore.LIGHTYELLOW_EX}Building folder structure in {folder}...{Fore.RESET}", ts=False)
-
         # --- Thinking spinner with live seconds ---
         stop_event = threading.Event()
 
@@ -210,11 +179,12 @@ No explanations, no markdown headings, only actionable steps."
         spinner_thread.start()
 
         # --- Call Gemini ---
-        raw_output = self.generate_steps(prompt, mode)
+        raw_output = self.generate_steps(prompt)
 
         # --- Stop thinking spinner ---
         stop_event.set()
         spinner_thread.join()
+        thinking_time = round(time.time() - (time.time() - 0), 2)  # we don't really need exact, just stop
         sys.stdout.write(f"\r{Fore.GREEN}💡 Done thinking!{Style.RESET_ALL}        \n")
         sys.stdout.flush()
 
@@ -231,55 +201,27 @@ No explanations, no markdown headings, only actionable steps."
         os.chdir(self.cwd)  # reset to original directory
     
     def ascii(self, configure=""):
-        if configure == "":
-            banner = r"""
-            ▄█  ███▄▄▄▄   ███▄▄▄▄    ▄██████▄   ▄█    █▄     ▄████████     ███        ▄████████ 
-        ███  ███▀▀▀██▄ ███▀▀▀██▄ ███    ███ ███    ███   ███    ███ ▀█████████▄   ███    ███ 
-        ███▌ ███   ███ ███   ███ ███    ███ ███    ███   ███    ███    ▀███▀▀██   ███    █▀  
-        ███▌ ███   ███ ███   ███ ███    ███ ███    ███   ███    ███     ███   ▀  ▄███▄▄▄     
-        ███▌ ███   ███ ███   ███ ███    ███ ███    ███ ▀███████████     ███     ▀▀███▀▀▀     
-        ███  ███   ███ ███   ███ ███    ███ ███    ███   ███    ███     ███       ███    █▄  
-        ███  ███   ███ ███   ███ ███    ███ ███    ███   ███    ███     ███       ███    ███ 
-        █▀    ▀█   █▀   ▀█   █▀   ▀██████▀   ▀██████▀    ███    █▀     ▄████▀     ██████████ 
-                                                                                            
-    ▄████████  ▄█        ▄█                                                                  
-    ███    ███ ███       ███                                                                  
-    ███    █▀  ███       ███▌                                                                 
-    ███        ███       ███▌                                                                 
-    ███        ███       ███▌                                                                 
-    ███    █▄  ███       ███                                                                  
-    ███    ███ ███▌    ▄ ███                                                                  
-    ████████▀  █████▄▄██ █▀           
-            """
-            try:
-                from fade import fire as fade_fire
-                print(fade_fire(banner))
-            except ImportError:
-                print(banner)
-
-            print("\n🌟 Welcome to \033[1;36mInnovate CLI 0.7\033[0m 🌟")
-            print("————————————————————————————————————————————————————")
-            print("🚀 The tool that helps imaginations turn into reality.")
-            print("💻 Build stunning projects with AI-powered precision.")
-            print("")
-            print(f"{Fore.CYAN}🌐 WEBSITE MODE{Style.RESET_ALL}  →  Create world-class websites")
-            print("   • Modern, responsive, and visually stunning designs")
-            print("   • HTML, CSS, JS, backend setup & deployment(coming soon!).")
-            print("   • React and Next.js along with other NPM frameworks are now compatible(vanilla css only).")
-            print("")
-            print(f"{Fore.MAGENTA}📱 APP MODE{Style.RESET_ALL}      →  Build full-featured applications")
-            print("   • Python apps, C, JS, and more")
-            print("   • End-to-end setup, configuration, and execution")
-            print("")
-            print("📚 Docs: \033[4minnovate.vaidik.co/docs\033[0m (in progress)")
-            print("📩 Support: vk@vaidik.co | \033[4mvaidik.co\033[0m")
-            print(f"💡 Project by: {Fore.YELLOW}Vaidik K.{Style.RESET_ALL}")
-            print("————————————————————————————————————————————————————\n")
-
+        if configure=="":
+            banner = """
+    ██╗      ██╗███╗   ██╗███╗   ██╗ ██████╗ ██╗   ██╗ █████╗ ████████╗███████╗
+    ╚██╗     ██║████╗  ██║████╗  ██║██╔═══██╗██║   ██║██╔══██╗╚══██╔══╝██╔════╝
+    ╚██╗    ██║██╔██╗ ██║██╔██╗ ██║██║   ██║██║   ██║███████║   ██║   █████╗  
+    ██╔╝    ██║██║╚██╗██║██║╚██╗██║██║   ██║╚██╗ ██╔╝██╔══██║   ██║   ██╔══╝  
+    ██╔╝     ██║██║ ╚████║██║ ╚████║╚██████╔╝ ╚████╔╝ ██║  ██║   ██║   ███████╗
+    ╚═╝      ╚═╝╚═╝  ╚═══╝╚═╝  ╚═══╝ ╚═════╝   ╚═══╝  ╚═╝  ╚═╝   ╚═╝   ╚══════╝
+                                                                                
+    ██████╗██╗     ██╗                                                         
+    ██╔════╝██║     ██║                                                        
+    ██║     ██║     ██║                                                        
+    ██║     ██║     ██║                                                        
+    ╚██████╗███████╗██║                                                        
+    ╚═════╝╚══════╝╚═╝"""
+            print(fade.random(banner))
+            print("Welcome to Innovate CLI 0.6 !")
+            print("> The tool which helps imaginations turn into a reality. One of the best coding tools that you can use.")
+            print("> Official documentation available at innovate.vaidik.co/docs (in progress)")
+            print("> If you're facing any errors or have suggestions, contact vk@vaidik.co or visit vaidik.co")
+            print("> project by Vaidik K.")
         else:
-            print(configure)
+            banner = f"""{configure}"""
             print("innovateCLI, product of vaidik.co")
-
-
-
-
