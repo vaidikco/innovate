@@ -89,18 +89,36 @@ class Innovate:
             return "\n".join(lines[1:])
         return block.strip()
 
-    def create_project_folder(self):
+    def create_project_folder(self, prompt: str) -> str:
+        print(f"{Fore.CYAN}Creating project folder...{Fore.RESET}")
         os.makedirs("projects", exist_ok=True)
+        response = self.client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=(
+                f"Generate ONLY a short, creative, unique project name (2–4 words max) "
+                f"for this idea: {prompt}. "
+                f"Do not include quotes, punctuation, or extra text."
+            )
+        )
+
+        raw_name = (response.text or "project").strip()
+
+        safe_name = re.sub(r"[^a-zA-Z0-9_-]", "-", raw_name).lower()
+        safe_name = re.sub(r"-+", "-", safe_name).strip("-")
+
+        # Add timestamp + random suffix to avoid collisions
         suffix = datetime.now().strftime("%Y%m%d_%H%M%S")
-        rand = ''.join(random.choices(string.ascii_lowercase + string.digits, k=5))
-        folder = f"projects/project_{suffix}_{rand}"
+        rand = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+        folder_name = f"{safe_name}-{rand}"
+
+        folder = os.path.join("projects", folder_name)
         os.makedirs(folder, exist_ok=True)
 
-        # Create innovate credits folder
         credits_dir = os.path.join(folder, "innovate")
         os.makedirs(credits_dir, exist_ok=True)
         with open(os.path.join(credits_dir, "credits.txt"), "w", encoding="utf-8") as f:
             f.write("Innovate CLI, product of vaidik.co\n")
+            f.write(f"Prompt: {prompt}")
             f.write("Version 0.7.1\n")
             f.write("Author: Vaidik K.\n")
             f.write("Website: innovate.vaidik.co\n")
@@ -192,7 +210,7 @@ No explanations, no markdown headings, only actionable steps."
 
     def generate(self, prompt: str, mode: str):
         global dir
-        folder = self.create_project_folder()
+        folder = self.create_project_folder(prompt=prompt)
         os.chdir(folder)
         dir=folder
         self.log(f"{Fore.LIGHTYELLOW_EX}Building folder structure in {folder}...{Fore.RESET}", ts=False)
