@@ -1,139 +1,61 @@
+from dotenv import load_dotenv
 import os
-import subprocess
-from google import genai
-from datetime import datetime
-import re
-import dotenv
-import random
-import string
-import zipfile
-from flask import Flask, render_template, request, redirect, url_for, flash, send_file, session
+from flask import Flask, request, jsonify, render_template, send_file
+load_dotenv()
+KEY = os.getenv("GEMINI_API_KEY")
+from src.innovate import Innovate, getDIR
+WI = Innovate(KEY)
+from flask import Flask, render_template, request, jsonify
+import time
 
-# ==== Load API key from .env ====
-dotenv.load_dotenv()
-key = os.getenv("GEMINI_API_KEY")
-
-# ==== Gemini 2.5 Pro Client Setup ====
-try:
-    key = os.getenv("GEMINI_API_KEY")
-    client = genai.Client(api_key=key)
-except Exception:
-    client = genai.Client(api_key="AIzaSyBraenCIuVM6jRPCSCQkWylfnFnu6cqK8I")
-
-# ==== Flask App ====
 app = Flask(__name__)
-app.secret_key = "your-secret-key"
-LOG_PATH = "agent.log"
 
-# ==== Log Helper ====
-def log(msg):
-    timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-    with open(LOG_PATH, "a", encoding="utf-8") as f:
-        f.write(f"{timestamp} {msg}\n")
-
-# ==== Generate Unique Project Folder ====
-def create_project_folder():
-    os.makedirs("projects", exist_ok=True)
-    suffix = datetime.now().strftime("%Y%m%d_%H%M%S")
-    rand = ''.join(random.choices(string.ascii_lowercase + string.digits, k=5))
-    folder = os.path.abspath(f"projects/project_{suffix}_{rand}")
-    os.makedirs(folder, exist_ok=True)
-    return folder
-
-# ==== Gemini Prompt Generator ====
-def generate_steps(prompt):
-    sys_prompt = (
-        "You're a code execution planner. From the user's request, generate a clean list of executable steps.\n"
-        "Use ONLY this format:\n"
-        "[CMD] shell command\n"
-        "[CD] target_directory\n"
-        "[CREATE] path/to/file.ext:\n```\nfile contents\n```\n"
-        "[APPEND] path/to/file.ext:\n```\nappended content\n```\n"
-        "No explanations. No markdown headings. Only actionable steps."
-    )
-    full_prompt = f"{sys_prompt}\nUser prompt: {prompt}"
-    response = client.models.generate_content(
-        model="gemini-2.5-pro",
-        contents=full_prompt
-    )
-    return response.text
-
-# ==== Step Parser ====
-def parse_steps(text):
-    pattern = r"\[(CMD|CD|CREATE|APPEND|EDIT)\](.*?)\n(?:```(.*?)```)?"
-    return re.findall(pattern, text, re.DOTALL)
-
-# ==== Language Tags to Strip ====
-langs = {"python", "html", "js", "javascript", "css", "ts", "typescript", "bash", "sh", "json"}
-def clean_block(block):
-    lines = block.strip().splitlines()
-    cleaned = "\n".join(lines[1:]) if lines and lines[0].strip().lower() in langs else block.strip()
-    return cleaned + "\n\n# Powered by Innovate CLI, a product of vaidik.co\n"
-
-# ==== Step Execution ====
-def execute_steps(steps, folder):
-    current_dir = folder
-    for i, (step_type, content, block) in enumerate(steps, 1):
-        log(f"\n--- Step {i} [{step_type}] ---\n{content.strip()}")
-        try:
-            if step_type == "CMD":
-                subprocess.run(content.strip(), shell=True, cwd=current_dir)
-            elif step_type == "CD":
-                new_dir = os.path.join(current_dir, content.strip())
-                os.makedirs(new_dir, exist_ok=True)
-                current_dir = new_dir
-            elif step_type == "CREATE":
-                path = os.path.join(current_dir, content.strip().rstrip(":"))
-                os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-                with open(path, "w", encoding="utf-8") as f:
-                    f.write(clean_block(block))
-            elif step_type == "APPEND":
-                path = os.path.join(current_dir, content.strip().rstrip(":"))
-                with open(path, "a", encoding="utf-8") as f:
-                    f.write("\n" + clean_block(block))
-        except Exception as e:
-            log(f"[ERROR] Step {i} failed: {e}")
-
-# ==== Flask Routes ====
-@app.route("/", methods=["GET", "POST"])
+@app.route("/")
 def index():
-    if request.method == "POST":
-        user_prompt = request.form.get("prompt", "").strip()
-        if not user_prompt:
-            flash("Prompt cannot be empty!", "danger")
-            return redirect(url_for("index"))
-
-        folder = create_project_folder()
-        log(f"🔧 Prompt: {user_prompt}")
-        raw_output = generate_steps(user_prompt)
-        log("📋 Generated Raw Output:\n" + raw_output)
-        steps = parse_steps(raw_output)
-        execute_steps(steps, folder)
-
-        # Zip project
-        zip_path = folder + ".zip"
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-            for root, _, files in os.walk(folder):
-                for file in files:
-                    full_path = os.path.join(root, file)
-                    rel_path = os.path.relpath(full_path, os.path.dirname(folder))
-                    zipf.write(full_path, rel_path)
-
-        session["zip_path"] = zip_path
-        flash(f"✅ Project created. You can download the ZIP below.", "success")
-        return redirect(url_for("index"))
-
     return render_template("index.html")
 
-@app.route("/download")
-def download():
-    zip_path = session.get("zip_path")
-    if zip_path and os.path.exists(zip_path):
-        return send_file(zip_path, as_attachment=True)
-    else:
-        flash("⚠️ Zip file not found!", "danger")
-        return redirect(url_for("index"))
+import shutil
+import os
 
-# ==== Run App ====
+@app.route("/process", methods=["POST"])
+def process():
+    try:
+        data = request.json.get("user_input")
+        app.logger.info("Received input: %s", data)
+
+        # Generate project (assumes WI.generate is synchronous)
+        WI.generate(data + " Also make a explanation.md, explaining the entire project..", "website")
+        project_dir = getDIR()
+        app.logger.info("Project directory: %s", project_dir)
+
+        # Make sure project_dir actually exists
+        if not project_dir or not os.path.exists(project_dir):
+            raise FileNotFoundError(f"Project dir not found: {project_dir}")
+
+        # Build zip
+        zip_path = f"{project_dir}.zip"
+        # If an old zip exists, remove it
+        if os.path.exists(zip_path):
+            os.remove(zip_path)
+
+        # shutil.make_archive takes base_name without .zip
+        # If project_dir contains backslashes, that's fine — shutil will create zip next to it.
+        shutil.make_archive(project_dir, 'zip', project_dir)
+        app.logger.info("Created zip at: %s", zip_path)
+
+        # Return the zip as attachment
+        # download_name works on modern Flask; if older version, use attachment_filename
+        return send_file(
+            zip_path,
+            as_attachment=True,
+            download_name=os.path.basename(zip_path),
+            mimetype='application/zip'
+        )
+    except Exception as e:
+        # Log with traceback for CLI debugging
+        app.logger.exception("Error in /process")
+        # Return plain JSON error and 500 so the frontend can show the server error text
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == "__main__":
-    app.run(debug=True, port=5200)
+    app.run(debug=True, port=5289, use_reloader=False)

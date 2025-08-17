@@ -15,7 +15,7 @@ from colorama import Fore, Style, init as colorama_init
 
 # Initialize colorama for colored output
 colorama_init(autoreset=True)
-
+dir = ""
 # ------------------ Spinner Class ------------------
 class Spinner:
     def __init__(self, text="Processing"):
@@ -101,9 +101,10 @@ class Innovate:
         os.makedirs(credits_dir, exist_ok=True)
         with open(os.path.join(credits_dir, "credits.txt"), "w", encoding="utf-8") as f:
             f.write("Innovate CLI, product of vaidik.co\n")
-            f.write("Version 0.5.4\n")
+            f.write("Version 0.7.1\n")
             f.write("Author: Vaidik K.\n")
             f.write("Website: innovate.vaidik.co\n")
+            f.write("<<? end of file ?>>")
 
         return folder
 
@@ -190,8 +191,10 @@ No explanations, no markdown headings, only actionable steps."
                 self.log(f"[ERROR] Step {i} failed: {e}")
 
     def generate(self, prompt: str, mode: str):
+        global dir
         folder = self.create_project_folder()
         os.chdir(folder)
+        dir=folder
         self.log(f"{Fore.LIGHTYELLOW_EX}Building folder structure in {folder}...{Fore.RESET}", ts=False)
 
         # --- Thinking spinner with live seconds ---
@@ -229,7 +232,7 @@ No explanations, no markdown headings, only actionable steps."
         proc_spinner.stop()
 
         os.chdir(self.cwd)  # reset to original directory
-    
+
     def ascii(self, configure=""):
         if configure == "":
             banner = r"""
@@ -257,7 +260,7 @@ No explanations, no markdown headings, only actionable steps."
             except ImportError:
                 print(banner)
 
-            print("\n🌟 Welcome to \033[1;36mInnovate CLI 0.7\033[0m 🌟")
+            print("\n🌟 Welcome to \033[1;36mInnovate CLI 0.7.1\033[0m 🌟")
             print("————————————————————————————————————————————————————")
             print("🚀 The tool that helps imaginations turn into reality.")
             print("💻 Build stunning projects with AI-powered precision.")
@@ -283,3 +286,5 @@ No explanations, no markdown headings, only actionable steps."
 
 
 
+def getDIR():
+    return dir
